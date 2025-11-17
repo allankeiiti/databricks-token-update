@@ -56,6 +56,33 @@ def process_secret(secret_id):
     old_token = secret_dict.get("token")
     old_expiration = secret_dict.get("expiration_time")
 
+    # --- VALIDAÇÃO DA EXPIRAÇÃO DE TOKEN ---
+    if old_token and old_expiration:
+        try:
+            # Converte a string YYYY-MM-DD para um objeto date
+            expiration_date_obj = datetime.datetime.strptime(old_expiration, "%Y-%m-%d").date()
+            # Pega a data de hoje (em UTC, para consistência)
+            today = datetime.datetime.now(datetime.UTC).date()
+            
+            days_remaining = (expiration_date_obj - today).days
+
+            if days_remaining > 15:
+                print(f"✅ O token ainda é válido por {days_remaining} dias (expira em {old_expiration}). A atualização não é necessária.")
+                return # Encerra a função
+            elif days_remaining <= 0:
+                 print(f"🚨 O token expirou há {-days_remaining} dias (em {old_expiration}). Iniciando renovação urgente...")
+            else:
+                print(f"⚠️ O token expira em {days_remaining} dias (em {old_expiration}). Iniciando renovação...")
+        
+        except ValueError:
+            # Caso a data esteja em formato inválido, força a renovação
+            print(f"⚠️ Não foi possível analisar a data de expiração antiga ('{old_expiration}'). Prosseguindo com a renovação.")
+        
+    else:
+        print("ℹ️ Token ou data de expiração antigos não encontrados. Prosseguindo com a geração de um novo token.")
+    # --- FIM DA VALIDAÇÃO DA EXPIRAÇÃO DE TOKEN ---
+
+
     # 2. Extrai campos obrigatórios
     application_id = secret_dict["application_id"]
     workspace = secret_dict["workspace"]
@@ -64,6 +91,7 @@ def process_secret(secret_id):
     scope = secret_dict.get("scope")
     secret_name = secret_dict.get("secret")
     workspace_scope = secret_dict.get("workspace_scope")
+    email_address = secret_dict.get("email") # Pega o email para Alteração 2
 
     # 3. Gera novo token via Databricks CLI
     print("🔧 Gerando novo token com Databricks CLI...")
@@ -102,12 +130,13 @@ def process_secret(secret_id):
     print(f"\n🔑 Novo token: {token_value}")
     print(f"📅 Expira em: {expiration_date}")
     print(f"🕒 Atualizado em: {update_time}")
-    print(f"✉️ Email: {secret_dict.get('email', 'N.A')}")
+    print(f"✉️ Email: {email_address or 'N.A'}")
+    
+    # 9. Texto adicional (Só exibe se o email foi fornecido)
+    if email_address:
+        sql_warehouse_name = secret_id.split("/")[-1]  # pega só o último trecho após "/"
 
-    # 9. Texto adicional
-    sql_warehouse_name = secret_id.split("/")[-1]  # pega só o último trecho após "/"
-
-    print(f"""
+        print(f"""
 [ IMPORTANTE ] Atualização de Token SQL Warehouse Databricks - \033[1m{sql_warehouse_name}\033[0m
 Prezado(a),
           
