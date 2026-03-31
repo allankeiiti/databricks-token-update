@@ -7,8 +7,8 @@ Automatize o gerenciamento de tokens do Databricks e AWS Secrets! Este projeto c
 ## ✨ Funcionalidades
 
 - 🔍 Verifica a validade do token armazenado no AWS Secrets
-- 🔄 Atualiza o token no AWS Secrets Manager
-- 🔐 Atualiza o token no Databricks Secrets
+- 🔄 Atualiza o token/secret no AWS Secrets Manager
+- 🔐 Atualiza o token/secret no Databricks Secrets
 - 📅 Automatiza o processo para evitar expiração inesperada
 
 ---
@@ -19,6 +19,11 @@ Automatize o gerenciamento de tokens do Databricks e AWS Secrets! Este projeto c
 - Conta e credenciais AWS válidas
 - Databricks CLI v0.259.0 ou superior
 - Python (utilizado: 3.12.3)
+- Variáveis de ambiente obrigatórias para o novo fluxo:
+  - `CLIENT_ID`
+  - `CLIENT_SECRET`
+
+> Estas variáveis são usadas para gerar o secret do service principal
 
 ---
 
@@ -34,6 +39,12 @@ Automatize o gerenciamento de tokens do Databricks e AWS Secrets! Este projeto c
 2. **Instale as dependências:**
 	```bash
 	pip install -r requirements.txt
+	```
+
+2.1 **Defina as variáveis de ambiente (novo fluxo):**
+	```bash
+	export CLIENT_ID=<seu-client-id>
+	export CLIENT_SECRET=<seu-client-secret>
 	```
 
 3. **Execute o script informando o nome da AWS Secret:**
