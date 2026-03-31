@@ -2,7 +2,9 @@ import subprocess
 import json
 import sys
 import datetime
+import os
 import boto3
+import requests
 
 def run_command(command):
     """
@@ -16,8 +18,7 @@ def run_command(command):
 
 def update_databricks_secret(scope, secret_name, token_value, workspace):
     """
-    Atualiza uma secret no Databricks via CLI usando:
-    databricks secrets put-secret <scope> <secret> --string-value '<token>' -p <workspace>
+    Atualiza uma secret no Databricks via CLI.
     """
     print(f"🔐 Atualizando secret '{secret_name}' no scope '{scope}' do Databricks workspace {workspace} ...")
     command = f"databricks secrets put-secret {scope} {secret_name} --string-value '{token_value}' -p {workspace}"
@@ -38,13 +39,8 @@ def update_aws_secret(secret_id, secret_dict):
 
 def process_secret(secret_id):
     """
-    Processo principal que:
-    1. Busca a secret existente.
-    2. Gera novo token via Databricks.
-    3. Atualiza os dados locais e no AWS Secrets Manager.
-    4. Atualiza secret no Databricks se aplicável.
+    Processo principal de renovação da credencial.
     """
-
     client = boto3.client("secretsmanager")
 
     # 1. Busca secret existente
@@ -63,27 +59,22 @@ def process_secret(secret_id):
             expiration_date_obj = datetime.datetime.strptime(old_expiration, "%Y-%m-%d").date()
             # Pega a data de hoje (em UTC, para consistência)
             today = datetime.datetime.now(datetime.UTC).date()
-            
             days_remaining = (expiration_date_obj - today).days
 
             if days_remaining > 15:
                 print(f"✅ O token ainda é válido por {days_remaining} dias (expira em {old_expiration}). A atualização não é necessária.")
-                return # Encerra a função
+                return 
             elif days_remaining <= 0:
                  print(f"🚨 O token expirou há {-days_remaining} dias (em {old_expiration}). Iniciando renovação urgente...")
             else:
                 print(f"⚠️ O token expira em {days_remaining} dias (em {old_expiration}). Iniciando renovação...")
-        
         except ValueError:
             # Caso a data esteja em formato inválido, força a renovação
             print(f"⚠️ Não foi possível analisar a data de expiração antiga ('{old_expiration}'). Prosseguindo com a renovação.")
-        
     else:
         print("ℹ️ Token ou data de expiração antigos não encontrados. Prosseguindo com a geração de um novo token.")
-    # --- FIM DA VALIDAÇÃO DA EXPIRAÇÃO DE TOKEN ---
 
-
-    # 2. Extrai campos obrigatórios
+    # 2. Extrai campos da Secret
     application_id = secret_dict["application_id"]
     workspace = secret_dict["workspace"]
 
@@ -91,65 +82,126 @@ def process_secret(secret_id):
     scope = secret_dict.get("scope")
     secret_name = secret_dict.get("secret")
     workspace_scope = secret_dict.get("workspace_scope")
-    email_address = secret_dict.get("email") # Pega o email para Alteração 2
+    email_address = secret_dict.get("email")
+    
+    # Novos campos para lógica OAuth
+    auth_method = secret_dict.get("sp_auth_method", "basic")
+    account_id = secret_dict.get("account_id", "c9e62cad-a2df-4dbc-b712-74b3ef6e0363")
 
-    # 3. Gera novo token via Databricks CLI
-    print("🔧 Gerando novo token com Databricks CLI...")
-    command = f"databricks token-management create-obo-token {application_id} --lifetime-seconds 7889400 -p {workspace}"
-    output = run_command(command)
-    token_data = json.loads(output)
+    lifetime_seconds = 7889400
 
-    token_value = token_data["token_value"]
-    expiry_time_ms = token_data["token_info"]["expiry_time"]
+    # 3. Fluxo Condicional de Geração de Token/Secret
+    if auth_method == "oauth_m2m":
+        print("\n🚀 Iniciando fluxo de renovação OAuth M2M (Account API)...")
+        
+        # Lendo credenciais das variáveis de ambiente
+        env_client_id = os.environ.get("CLIENT_ID")
+        env_client_secret = os.environ.get("CLIENT_SECRET")
 
-    # 4. Datas formatadas
-    expiration_date = datetime.datetime.fromtimestamp(expiry_time_ms / 1000, tz=datetime.UTC).strftime("%Y-%m-%d")
+        if not env_client_id or not env_client_secret:
+            raise Exception("ERRO: As variáveis de ambiente CLIENT_ID e CLIENT_SECRET não foram encontradas. Elas são obrigatórias para gerar o token Account-Level.")
+
+        # Passo 1 - Gerar token account-level usando as variáveis de ambiente
+        print("   ↳ 1. Gerando token account-level...")
+        token_url = f"https://accounts.cloud.databricks.com/oidc/accounts/{account_id}/v1/token"
+        
+        # O parâmetro 'auth' do requests simula exatamente o comportamento do '--user "$CLIENT_ID:$CLIENT_SECRET"' no cURL
+        token_resp = requests.post(
+            token_url,
+            auth=(env_client_id, env_client_secret),
+            data={"grant_type": "client_credentials", "scope": "all-apis"}
+        )
+        token_resp.raise_for_status()
+        oauth_token = token_resp.json()["access_token"]
+
+        # Passo 2 - Obter o internal_id (Resource ID) do Service Principal a ser renovado
+        print("   ↳ 2. Obtendo o Service Principal ID interno via SCIM...")
+        scim_url = f"https://accounts.cloud.databricks.com/api/2.0/accounts/{account_id}/scim/v2/ServicePrincipals"
+        scim_resp = requests.get(
+            scim_url,
+            headers={"Authorization": f"Bearer {oauth_token}"},
+            params={"filter": f"applicationId eq '{application_id}'"}
+        )
+        scim_resp.raise_for_status()
+        
+        resources = scim_resp.json().get("Resources", [])
+        if not resources:
+            raise Exception(f"Service Principal com applicationId {application_id} não encontrado na conta {account_id}.")
+        internal_id = resources[0]["id"]
+
+        # Passo 3 - Gerar a nova secret para este Service Principal
+        print(f"   ↳ 3. Gerando nova Client Secret para o ID interno: {internal_id}...")
+        secrets_url = f"https://accounts.cloud.databricks.com/api/2.0/accounts/{account_id}/servicePrincipals/{internal_id}/credentials/secrets"
+        secrets_resp = requests.post(
+            secrets_url,
+            headers={"Authorization": f"Bearer {oauth_token}"},
+            json={"lifetime": f"{lifetime_seconds}s"}
+        )
+        secrets_resp.raise_for_status()
+        
+        # Coleta a nova secret
+        token_value = secrets_resp.json()["secret"]
+        
+        # Calcula a nova data de expiração
+        expiry_datetime = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=lifetime_seconds)
+        expiration_date = expiry_datetime.strftime("%Y-%m-%d")
+
+    else:
+        # Fluxo OBO Token (Basic)
+        print("\n🔧 Gerando novo token OBO com Databricks CLI...")
+        command = f"databricks token-management create-obo-token {application_id} --lifetime-seconds {lifetime_seconds} -p {workspace}"
+        output = run_command(command)
+        token_data = json.loads(output)
+
+        token_value = token_data["token_value"]
+        expiry_time_ms = token_data["token_info"]["expiry_time"]
+        expiration_date = datetime.datetime.fromtimestamp(expiry_time_ms / 1000, tz=datetime.UTC).strftime("%Y-%m-%d")
+
+
+    # 4. Atualiza valores comuns na secret local
     update_time = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d")
-
-    # 5. Atualiza valores na secret local
     secret_dict["token"] = token_value
     secret_dict["expiration_time"] = expiration_date
     secret_dict["update_time"] = update_time
 
-    # 6. Atualiza secret na AWS
+    # 5. Atualiza secret na AWS
     update_aws_secret(secret_id, secret_dict)
 
-    # 7. Atualiza secret no Databricks, se aplicável
+    # 6. Atualiza secret no Databricks, se aplicável
     if scope and secret_name:
         update_databricks_secret(scope, secret_name, token_value, workspace_scope or workspace)
     else:
-        print("ℹ️ Campos 'scope' e/ou 'secret' não encontrados. Databricks não será atualizado.")
+        print("ℹ️ Campos 'scope' e/ou 'secret' não encontrados. O Secret Scope do Databricks não será atualizado.")
 
-    # 8. Resumo
-    print(f"\nResumo da atualização:")
+    # 7. Resumo
+    print(f"\n📋 Resumo da atualização:")
+    print(f"🔒 Método utilizado: {auth_method}")
     if old_token:
-        print(f"🔑 Token antigo: {old_token}")
+        print(f"🔑 Token/Secret antigo: {old_token[:5]}... (ocultado)")
     if old_expiration:
         print(f"📅 Expiração antiga: {old_expiration}")
 
-    print(f"\n🔑 Novo token: {token_value}")
+    print(f"\n🔑 Novo Token/Secret: {token_value[:5]}... (ocultado)")
     print(f"📅 Expira em: {expiration_date}")
     print(f"🕒 Atualizado em: {update_time}")
     print(f"✉️ Email: {email_address or 'N.A'}")
     
-    # 9. Texto adicional (Só exibe se o email foi fornecido)
+    # 8. Texto adicional
     if email_address:
-        sql_warehouse_name = secret_id.split("/")[-1]  # pega só o último trecho após "/"
+        sql_warehouse_name = secret_id.split("/")[-1]
 
         print(f"""
-[ IMPORTANTE ] Atualização de Token SQL Warehouse Databricks - \033[1m{sql_warehouse_name}\033[0m
+[ IMPORTANTE ] Atualização de Credenciais SQL Warehouse Databricks - \033[1m{sql_warehouse_name}\033[0m
 Prezado(a),
           
-Este email contém o seu novo token de acesso para o SQL Warehouse \033[1m{sql_warehouse_name}\033[0m no Databricks.
+Este email contém suas novas credenciais de acesso para o SQL Warehouse \033[1m{sql_warehouse_name}\033[0m no Databricks.
 
-Seu token antigo, com vencimento em \033[1m{old_expiration}\033[0m, precisa ser atualizado pelo novo token.
+Sua credencial antiga, com vencimento em \033[1m{old_expiration}\033[0m, foi substituída.
 
-Token Antigo: {old_token}
-
-Token Novo: {token_value}
+Nova Credencial: {token_value}
 Validade: \033[1m{expiration_date}\033[0m
 
-Por favor, atualize suas configurações para usar o novo token antes da data de expiração do antigo para evitar interrupções.
+Por favor, atualize suas configurações para usar a nova credencial antes da data de expiração da antiga para evitar interrupções.
 
 Em caso de dúvidas, estamos à disposição.
 
@@ -157,9 +209,6 @@ Atenciosamente,
 """)
 
 def main():
-    """
-    Função principal que apenas chama o processamento da secret.
-    """
     if len(sys.argv) != 2:
         print("Uso: python update_databricks_secret.py <nome_da_secret>")
         sys.exit(1)
