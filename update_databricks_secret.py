@@ -3,6 +3,7 @@ import json
 import sys
 import datetime
 import os
+import re
 import boto3
 import requests
 
@@ -187,22 +188,29 @@ def process_secret(secret_id):
     print(f"✉️ Email: {email_address or 'N.A'}")
     
     # 8. Texto adicional
-    if email_address:
+    email_list = [e.strip() for e in re.split(r"[,;\s]+", email_address or "") if e.strip()]
+    if email_list:
         sql_warehouse_name = secret_id.split("/")[-1]
+        single_email_warning = (
+            "\nPoderia informar um ou mais nomes (email) para receber esse novo token para evitar que tenha interrupção dos serviços por falta de comunicação a todos os envolvidos ?\n"
+            if len(email_list) == 1
+            else ""
+        )
 
         print(f"""
 [ IMPORTANTE ] Atualização de Credenciais SQL Warehouse Databricks - \033[1m{sql_warehouse_name}\033[0m
 Prezado(a),
-          
-Este email contém suas novas credenciais de acesso para o SQL Warehouse \033[1m{sql_warehouse_name}\033[0m no Databricks.
 
-Sua credencial antiga, com vencimento em \033[1m{old_expiration}\033[0m, foi substituída.
+Este email contém suas novas credenciais de acesso para o SQL Warehouse \033[1m{sql_warehouse_name}\033[0m
 
+Sua credencial antiga, associada ao Application ID \033[1m{application_id}\033[0m e com vencimento em \033[1m{old_expiration}\033[0m, foi substituída.
+
+Application ID: \033[1m{application_id}\033[0m
 Nova Credencial: {token_value}
 Validade: \033[1m{expiration_date}\033[0m
 
 Por favor, atualize suas configurações para usar a nova credencial antes da data de expiração da antiga para evitar interrupções.
-
+{single_email_warning}
 Em caso de dúvidas, estamos à disposição.
 
 Atenciosamente,
