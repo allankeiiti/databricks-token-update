@@ -7,6 +7,26 @@ import re
 import boto3
 import requests
 
+def bold(text):
+    """
+    Converte texto para caracteres Unicode 'Mathematical Bold', que sobrevivem
+    ao copy-paste em clientes de email (Outlook, Gmail) sem precisar de HTML.
+    Caracteres sem equivalente bold (acentos, símbolos) são mantidos.
+    """
+    text = str(text)
+    result = []
+    for ch in text:
+        code = ord(ch)
+        if 0x41 <= code <= 0x5A:        # A-Z
+            result.append(chr(0x1D400 + code - 0x41))
+        elif 0x61 <= code <= 0x7A:      # a-z
+            result.append(chr(0x1D41A + code - 0x61))
+        elif 0x30 <= code <= 0x39:      # 0-9
+            result.append(chr(0x1D7CE + code - 0x30))
+        else:
+            result.append(ch)
+    return "".join(result)
+
 def run_command(command):
     """
     Executa um comando no shell e retorna a saída.
@@ -198,16 +218,16 @@ def process_secret(secret_id):
         )
 
         print(f"""
-[ IMPORTANTE ] Atualização de Credenciais SQL Warehouse Databricks - \033[1m{sql_warehouse_name}\033[0m
+[ IMPORTANTE ] Atualização de Credenciais SQL Warehouse Databricks - {bold(sql_warehouse_name)}
 Prezado(a),
 
-Este email contém suas novas credenciais de acesso para o SQL Warehouse \033[1m{sql_warehouse_name}\033[0m
+Este email contém suas novas credenciais de acesso para o SQL Warehouse {bold(sql_warehouse_name)}
 
-Sua credencial antiga, associada ao Application ID \033[1m{application_id}\033[0m e com vencimento em \033[1m{old_expiration}\033[0m, foi substituída.
+Sua credencial antiga, associada ao Application ID {bold(application_id)} e com vencimento em {bold(old_expiration)}, foi substituída.
 
-Application ID: \033[1m{application_id}\033[0m
+Application ID: {bold(application_id)}
 Nova Credencial: {token_value}
-Validade: \033[1m{expiration_date}\033[0m
+Validade: {bold(expiration_date)}
 
 Por favor, atualize suas configurações para usar a nova credencial antes da data de expiração da antiga para evitar interrupções.
 {single_email_warning}
