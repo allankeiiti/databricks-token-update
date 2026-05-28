@@ -6,6 +6,7 @@ import os
 import re
 import boto3
 import requests
+from dotenv import load_dotenv
 
 def bold(text):
     """
@@ -114,8 +115,9 @@ def process_secret(secret_id):
     # 3. Fluxo Condicional de Geração de Token/Secret
     if auth_method == "oauth_m2m":
         print("\n🚀 Iniciando fluxo de renovação OAuth M2M (Account API)...")
-        
-        # Lendo credenciais das variáveis de ambiente
+
+        load_dotenv(override=True)
+
         env_client_id = os.environ.get("CLIENT_ID")
         env_client_secret = os.environ.get("CLIENT_SECRET")
 
