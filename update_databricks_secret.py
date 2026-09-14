@@ -43,7 +43,9 @@ def update_databricks_secret(scope, secret_name, token_value, workspace):
     Atualiza uma secret no Databricks via CLI.
     """
     print(f"🔐 Atualizando secret '{secret_name}' no scope '{scope}' do Databricks workspace {workspace} ...")
-    command = f"databricks secrets put-secret {scope} {secret_name} --string-value '{token_value}' -p {workspace}"
+    # command = f"databricks secrets put-secret {scope} {secret_name} --string-value '{token_value}' -p {workspace}"
+    command = fr"C:\databricks\databricks.exe secrets put-secret {scope} {secret_name} --string-value '{token_value}' -p {workspace}"
+
     run_command(command)
     print("✅ Secret atualizada no Databricks com sucesso.")
 
@@ -52,7 +54,7 @@ def update_aws_secret(secret_id, secret_dict):
     Atualiza a secret no AWS Secrets Manager com o novo dicionário completo.
     """
     print("📦 Atualizando secret no AWS Secrets Manager...")
-    client = boto3.client("secretsmanager")
+    client = boto3.client("secretsmanager", region_name='us-east-1')
     client.update_secret(
         SecretId=secret_id,
         SecretString=json.dumps(secret_dict)
@@ -161,10 +163,10 @@ def process_secret(secret_id):
             json={"lifetime": f"{lifetime_seconds}s"}
         )
         secrets_resp.raise_for_status()
-        
+
         # Coleta a nova secret
         token_value = secrets_resp.json()["secret"]
-        
+
         # Calcula a nova data de expiração
         expiry_datetime = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=lifetime_seconds)
         expiration_date = expiry_datetime.strftime("%Y-%m-%d")
@@ -172,7 +174,8 @@ def process_secret(secret_id):
     else:
         # Fluxo OBO Token (Basic)
         print("\n🔧 Gerando novo token OBO com Databricks CLI...")
-        command = f"databricks token-management create-obo-token {application_id} --lifetime-seconds {lifetime_seconds} -p {workspace}"
+        # command = f"databricks token-management create-obo-token {application_id} --lifetime-seconds {lifetime_seconds} -p {workspace}"
+        command = f"C:\databricks\databricks.exe token-management create-obo-token {application_id} --lifetime-seconds {lifetime_seconds} -p {workspace}"
         output = run_command(command)
         token_data = json.loads(output)
 
@@ -220,16 +223,16 @@ def process_secret(secret_id):
         )
 
         print(f"""
-[ IMPORTANTE ] Atualização de Credenciais SQL Warehouse Databricks - {bold(sql_warehouse_name)}
+[ IMPORTANTE ] Atualização de Credenciais SQL Warehouse Databricks - {sql_warehouse_name}
 Prezado(a),
 
-Este email contém suas novas credenciais de acesso para o SQL Warehouse {bold(sql_warehouse_name)}
+Este email contém suas novas credenciais de acesso para o SQL Warehouse {sql_warehouse_name}
 
-Sua credencial antiga, associada ao Application ID {bold(application_id)} e com vencimento em {bold(old_expiration)}, foi substituída.
+Sua credencial antiga, associada ao Application ID {application_id} e com vencimento em {old_expiration}, foi substituída.
 
-Application ID: {bold(application_id)}
+Application ID: {application_id}
 Nova Credencial: {token_value}
-Validade: {bold(expiration_date)}
+Validade: {expiration_date}
 
 Por favor, atualize suas configurações para usar a nova credencial antes da data de expiração da antiga para evitar interrupções.
 {single_email_warning}
@@ -242,6 +245,13 @@ def main():
     if len(sys.argv) != 2:
         print("Uso: python update_databricks_secret.py <nome_da_secret>")
         sys.exit(1)
+
+    env_client_id = os.environ.get("CLIENT_ID")
+    env_client_secret = os.environ.get("CLIENT_SECRET")
+    print('=' * 30)
+    print('env_client_id: ', env_client_id)
+    print('env_client_secret: ', env_client_secret[0:5])
+
 
     secret_id = sys.argv[1]
     process_secret(secret_id)
