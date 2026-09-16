@@ -47,9 +47,13 @@ Automatize o gerenciamento de tokens do Databricks e AWS Secrets! Este projeto c
 	export CLIENT_SECRET=<seu-client-secret>
 	```
 
-3. **Execute o script informando o nome da AWS Secret:**
+3. **Execute o script informando o nome da AWS Secret (e opcionalmente o tempo de expiração em segundos):**
 	```bash
+	# Execução com tempo de expiração padrão (7889400 segundos / ~90 dias):
 	python3 update_databricks_secret.py coedados/databricks_token/storage_prd/projeto_xpto_prodbox
+
+	# Ou informando um tempo de expiração customizado em segundos (ex: 2592000 segundos / 30 dias):
+	python3 update_databricks_secret.py coedados/databricks_token/storage_prd/projeto_xpto_prodbox 2592000
 	```
 
 ---
@@ -57,7 +61,11 @@ Automatize o gerenciamento de tokens do Databricks e AWS Secrets! Este projeto c
 ## 📄 Exemplo de uso
 
 ```bash
+# Execução padrão (~90 dias)
 python3 update_databricks_secret.py coedados/databricks_token/storage_prd/projeto_xpto_prodbox
+
+# Execução informando lifetime_seconds customizado
+python3 update_databricks_secret.py coedados/databricks_token/storage_prd/projeto_xpto_prodbox 2592000
 ```
 
 ---
