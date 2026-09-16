@@ -43,7 +43,6 @@ def update_databricks_secret(scope, secret_name, token_value, workspace):
     Atualiza uma secret no Databricks via CLI.
     """
     print(f"🔐 Atualizando secret '{secret_name}' no scope '{scope}' do Databricks workspace {workspace} ...")
-    # command = f"databricks secrets put-secret {scope} {secret_name} --string-value '{token_value}' -p {workspace}"
     command = fr"C:\databricks\databricks.exe secrets put-secret {scope} {secret_name} --string-value '{token_value}' -p {workspace}"
 
     run_command(command)
@@ -61,7 +60,7 @@ def update_aws_secret(secret_id, secret_dict):
     )
     print(f"✅ Secret '{secret_id}' atualizada com sucesso na AWS.")
 
-def process_secret(secret_id, lifetime_seconds=7889400):
+def process_secret(secret_id):
     """
     Processo principal de renovação da credencial.
     """
@@ -110,16 +109,13 @@ def process_secret(secret_id, lifetime_seconds=7889400):
     
     # Novos campos para lógica OAuth
     auth_method = secret_dict.get("sp_auth_method", "basic")
-    account_id = secret_dict.get("account_id", "")
+    account_id = secret_dict.get("account_id", "c9e62cad-a2df-4dbc-b712-74b3ef6e0363")
 
-    lifetime_seconds = int(lifetime_seconds) if lifetime_seconds else 7889400
+    lifetime_seconds = 7889400
 
     # 3. Fluxo Condicional de Geração de Token/Secret
     if auth_method == "oauth_m2m":
         print("\n🚀 Iniciando fluxo de renovação OAuth M2M (Account API)...")
-
-        if not account_id or not str(account_id).strip():
-            raise ValueError("O campo 'account_id' é obrigatório e deve ser especificado para a autenticação OAuth M2M.")
 
         load_dotenv(override=True)
 
@@ -245,29 +241,19 @@ Atenciosamente,
 """)
 
 def main():
-    if len(sys.argv) not in (2, 3):
-        print("Uso: python update_databricks_secret.py <nome_da_secret> [lifetime_seconds]")
+    if len(sys.argv) != 2:
+        print("Uso: python update_databricks_secret.py <nome_da_secret>")
         sys.exit(1)
 
     env_client_id = os.environ.get("CLIENT_ID")
     env_client_secret = os.environ.get("CLIENT_SECRET")
     print('=' * 30)
     print('env_client_id: ', env_client_id)
-    print('env_client_secret: ', env_client_secret[0:5] if env_client_secret else '')
+    print('env_client_secret: ', env_client_secret[0:5])
+
 
     secret_id = sys.argv[1]
-    lifetime_seconds = 7889400
-
-    if len(sys.argv) == 3:
-        try:
-            lifetime_seconds = int(sys.argv[2])
-            if lifetime_seconds <= 0:
-                raise ValueError
-        except ValueError:
-            print("Erro: 'lifetime_seconds' deve ser um número inteiro positivo.")
-            sys.exit(1)
-
-    process_secret(secret_id, lifetime_seconds=lifetime_seconds)
+    process_secret(secret_id)
 
 if __name__ == "__main__":
     main()
